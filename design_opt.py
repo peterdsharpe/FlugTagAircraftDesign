@@ -2,6 +2,7 @@
 import aerosandbox as asb
 import aerosandbox.library.aerodynamics as aero
 import aerosandbox.library.atmosphere as atmo
+from aerosandbox.library import aerodynamics as lib_aero
 from aerosandbox.library import mass_structural as lib_mass_struct
 from aerosandbox.library import propulsion_electric as lib_prop_elec
 from aerosandbox.library import propulsion_propeller as lib_prop_prop
@@ -81,7 +82,7 @@ structural_mass_margin_multiplier = opti.parameter()
 opti.set_value(structural_mass_margin_multiplier, 1.25)
 
 ##### Simulation Parameters
-n_timesteps = 100  # Only relevant if allow_trajectory_optimization is True.
+n_timesteps = 250  # Only relevant if allow_trajectory_optimization is True.
 # Quick convergence testing indicates you can get bad analyses below 150 or so...
 
 ##### Optimization bounds
@@ -92,7 +93,7 @@ min_speed = 1  # Specify a minimum speed - keeps the speed-gamma velocity parame
 # region Trajectory Optimization Variables
 ##### Initialize trajectory optimization variables
 
-x = ops_var(initial_guess=cas.linspace(0, 50, n_timesteps), scale_factor=5, n_variables=n_timesteps)
+x = ops_var(initial_guess=cas.linspace(0, 100, n_timesteps), scale_factor=5, n_variables=n_timesteps)
 
 y = ops_var(initial_guess=cas.linspace(10, 0, n_timesteps), scale_factor=1, n_variables=n_timesteps)
 
@@ -101,13 +102,13 @@ opti.subject_to([
     airspeed / min_speed > 0.1
 ])
 
-flight_path_angle = ops_var(initial_guess=-12, scale_factor=1, n_variables=n_timesteps)
+flight_path_angle = ops_var(initial_guess=-6, scale_factor=5, n_variables=n_timesteps)
 opti.subject_to([
     flight_path_angle / 90 < 1,
     flight_path_angle / 90 > -1,
 ])
 
-alpha = ops_var(initial_guess=5, scale_factor=4, n_variables=n_timesteps)
+alpha = ops_var(initial_guess=6, scale_factor=4, n_variables=n_timesteps)
 opti.subject_to([
     alpha > -8,
     alpha < 12
@@ -119,10 +120,11 @@ net_accel_parallel = ops_var(initial_guess=0, scale_factor=1e-1, n_variables=n_t
 net_accel_perpendicular = ops_var(initial_guess=0, scale_factor=1, n_variables=n_timesteps)
 
 ##### Set up time
-time_nondim = cas.linspace(0, 1, n_timesteps)
+# time_nondim = cas.linspace(0, 1, n_timesteps)
+time_nondim = cosspace(0, 1, n_timesteps)
 endurance = ops_var(initial_guess=12, scale_factor=10)
 opti.subject_to([
-    endurance > 0
+    endurance > 1
 ])
 time = time_nondim * endurance
 # endregion
@@ -262,6 +264,9 @@ drag_wing_profile = wing_Cd_profile * q * wing.area()
 
 wing_oswalds_efficiency = 0.95  # TODO make this a function of taper ratio
 drag_wing_induced = lift_wing ** 2 / (q * np.pi * wing.span() ** 2 * wing_oswalds_efficiency)
+drag_wing_induced *= lib_aero.induced_drag_ratio_from_ground_effect(
+    h_over_b=y/wing.span()
+)
 
 drag_wing = drag_wing_profile + drag_wing_induced
 
@@ -387,7 +392,7 @@ power_in = lib_power_human.power_human(
         # dataset="World-Class Athletes"
     )
 opti.subject_to([
-    # thrust_force == 0 # No thrust
+    # thrust_force == 0, # No thrust
     thrust_force > 0,
     power_out < power_in
 ])
@@ -504,9 +509,6 @@ opti.subject_to([
 ])
 
 ##### Add final state constraints
-opti.subject_to([  # Air Launch
-    y[-1] == 0,
-])
 
 
 ##### Useful metrics
@@ -533,10 +535,10 @@ things_to_slightly_minimize = (
 penalty = 0
 penalty_denominator = n_timesteps
 penalty += cas.sum1(cas.diff(thrust_force / 100) ** 2) / penalty_denominator
-# penalty += cas.sum1(cas.diff(net_accel_parallel / 3) ** 2) / penalty_denominator
-# penalty += cas.sum1(cas.diff(net_accel_perpendicular / 3) ** 2) / penalty_denominator
-# penalty += cas.sum1(cas.diff(airspeed / 8) ** 2) / penalty_denominator
-# penalty += cas.sum1(cas.diff(flight_path_angle / 10) ** 2) / penalty_denominator
+penalty += cas.sum1(cas.diff(net_accel_parallel / 3) ** 2) / penalty_denominator
+penalty += cas.sum1(cas.diff(net_accel_perpendicular / 3) ** 2) / penalty_denominator
+penalty += cas.sum1(cas.diff(airspeed / 8) ** 2) / penalty_denominator
+penalty += cas.sum1(cas.diff(flight_path_angle / 10) ** 2) / penalty_denominator
 penalty += cas.sum1(cas.diff(alpha / 5) ** 2) / penalty_denominator
 
 opti.minimize(
